@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Temporizador — Control</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; min-height: 100%; background: #0a0a0a; color: #fff; font-family: monospace; }
+body { display: flex; flex-direction: column; align-items: center; padding: 1.5rem 1rem 2rem; gap: 1.5rem; }
+h1 { font-size: 0.75rem; letter-spacing: 0.25em; opacity: 0.4; margin-top: 0.5rem; }
+#time-preview { font-size: clamp(3.5rem, 18vw, 5rem); font-weight: 700; letter-spacing: 0.05em; font-variant-numeric: tabular-nums; text-align: center; }
+#time-preview.warning { color: #f97316; }
+#time-preview.danger { color: #ef4444; }
+#mode-label { font-size: 0.7rem; letter-spacing: 0.2em; opacity: 0.45; }
+.section { width: 100%; max-width: 400px; }
+.section-title { font-size: 0.65rem; letter-spacing: 0.2em; opacity: 0.4; margin-bottom: 0.6rem; }
+.btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 1rem; border-radius: 10px; cursor: pointer; font-size: 0.85rem; letter-spacing: 0.08em; font-family: monospace; transition: background 0.15s; touch-action: manipulation; width: 100%; }
+.btn:active { background: rgba(255,255,255,0.3); transform: scale(0.97); }
+.btn.primary { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.45); }
+.btn.danger-btn { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); }
+.btn.full { grid-column: 1 / -1; }
+#upload-btn { width: 100%; background: rgba(255,255,255,0.06); border: 1px dashed rgba(255,255,255,0.25); color: rgba(255,255,255,0.6); padding: 1rem; border-radius: 10px; cursor: pointer; font-size: 0.8rem; letter-spacing: 0.1em; font-family: monospace; touch-action: manipulation; }
+#file-input { display: none; }
+#slide-info { font-size: 0.75rem; opacity: 0.45; text-align: center; margin-top: 0.5rem; letter-spacing: 0.1em; }
+#set-panel { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 50; align-items: center; justify-content: center; }
+#set-panel.open { display: flex; }
+#set-card { background: #111; border: 1px solid rgba(255,255,255,0.2); border-radius: 14px; padding: 2rem 1.5rem; width: 290px; text-align: center; }
+#set-card h3 { font-size: 0.7rem; letter-spacing: 0.2em; opacity: 0.45; margin-bottom: 1.25rem; }
+#time-input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); color: #fff; font-size: 2.5rem; text-align: center; border-radius: 8px; padding: 0.5rem; width: 100%; font-family: monospace; margin-bottom: 1rem; }
+.row { display: flex; gap: 0.5rem; }
+.row .btn { flex: 1; }
+#status-bar { font-size: 0.65rem; letter-spacing: 0.15em; opacity: 0.3; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>CONTROL REMOTO</h1>
+<div id="time-preview">--:--</div>
+<div id="mode-label">CUENTA REGRESIVA</div>
+<div id="status-bar">CONECTANDO...</div>
+
+<div class="section">
+  <div class="section-title">TEMPORIZADOR</div>
+  <div class="btn-grid">
+    <button class="btn primary full" id="play-btn">▶ INICIAR</button>
+    <button class="btn" id="stop-btn">■ REINICIAR</button>
+    <button class="btn" id="set-btn">⏱ AJUSTAR TIEMPO</button>
+    <button class="btn full" id="mode-btn">⇄ CAMBIAR A PROGRESIVO</button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">DIAPOSITIVAS</div>
+  <div class="btn-grid">
+    <button class="btn" id="prev-btn">◀ ANTERIOR</button>
+    <button class="btn" id="next-btn">SIGUIENTE ▶</button>
+  </div>
+  <div style="margin-top: 0.6rem;">
+    <button id="upload-btn" onclick="document.getElementById('file-input').click()">+ SUBIR IMÁGENES DESDE EL MÓVIL</button>
+    <input type="file" id="file-input" multiple accept="image/*">
+  </div>
+  <div id="slide-info">SIN IMÁGENES CARGADAS</div>
+</div>
+
+<div id="set-panel">
+  <div id="set-card">
+    <h3>AJUSTAR TIEMPO (MM:SS)</h3>
+    <input type="text" id="time-input" value="45:00" maxlength="5" placeholder="45:00">
+    <div class="row">
+      <button class="btn" id="cancel-btn">CANCELAR</button>
+      <button class="btn primary" id="confirm-btn">CONFIRMAR</button>
+    </div>
+  </div>
+</div>
+
+<!-- ✅ REEMPLAZA ESTE BLOQUE CON TU firebaseConfig -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBORR1E4boTpovc7is4d-qNCf9CAx8s1RI",
+    authDomain: "caja87-6e5d9.firebaseapp.com",
+    databaseURL: "https://caja87-6e5d9-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "caja87-6e5d9",
+    storageBucket: "caja87-6e5d9.firebasestorage.app",
+    messagingSenderId: "955964235169",
+    appId: "1:955964235169:web:a08564071ddae65bffe0"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const timerRef = ref(db, 'timer');
+
+  // Estado local
+  let state = {
+    totalSeconds: 2700,
+    elapsed: 0,
+    running: false,
+    countdown: true,
+    currentSlide: 0,
+    totalSlides: 0,
+    imageData: null,
+    images: []
+  };
+
+  let ticker = null;
+
+  function pad(n) { return String(n).padStart(2,'0'); }
+  function fmt(s) {
+    const a = Math.abs(s);
+    return (s < 0 ? '-' : '') + pad(Math.floor(a/60)) + ':' + pad(a%60);
+  }
+
+  function push() {
+    const toSave = {
+      totalSeconds: state.totalSeconds,
+      elapsed: state.elapsed,
+      running: state.running,
+      countdown: state.countdown,
+      currentSlide: state.currentSlide,
+      totalSlides: state.totalSlides,
+      imageData: state.images[state.currentSlide] || null
+    };
+    set(timerRef, toSave);
+  }
+
+  function refreshPreview() {
+    const preview = document.getElementById('time-preview');
+    const shown = state.countdown ? state.totalSeconds - state.elapsed : state.elapsed;
+    preview.textContent = fmt(shown);
+    preview.classList.remove('warning','danger');
+    if (state.countdown) {
+      const r = state.elapsed / state.totalSeconds;
+      if (r > 0.9) preview.classList.add('danger');
+      else if (r > 0.75) preview.classList.add('warning');
+    }
+    document.getElementById('mode-label').textContent = state.countdown ? 'CUENTA REGRESIVA' : 'CUENTA PROGRESIVA';
+    document.getElementById('slide-info').textContent = state.totalSlides
+      ? 'DIAPOSITIVA ' + (state.currentSlide+1) + ' / ' + state.totalSlides
+      : 'SIN IMÁGENES CARGADAS';
+  }
+
+  function startTicker() {
+    clearInterval(ticker);
+    ticker = setInterval(() => {
+      state.elapsed++;
+      refreshPreview();
+      push();
+      if (state.countdown && state.elapsed >= state.totalSeconds) {
+        clearInterval(ticker);
+        state.running = false;
+        document.getElementById('play-btn').textContent = '▶ INICIAR';
+        push();
+      }
+    }, 1000);
+  }
+
+  // Escuchar cambios externos (por si acaso)
+  onValue(timerRef, snap => {
+    document.getElementById('status-bar').textContent = 'SINCRONIZADO ●';
+  });
+
+  // Play / Pausa
+  document.getElementById('play-btn').addEventListener('click', () => {
+    if (state.running) {
+      clearInterval(ticker);
+      state.running = false;
+      document.getElementById('play-btn').textContent = '▶ CONTINUAR';
+    } else {
+      state.running = true;
+      document.getElementById('play-btn').textContent = '⏸ PAUSAR';
+      startTicker();
+    }
+    push();
+  });
+
+  // Reiniciar
+  document.getElementById('stop-btn').addEventListener('click', () => {
+    clearInterval(ticker);
+    state.running = false;
+    state.elapsed = 0;
+    document.getElementById('play-btn').textContent = '▶ INICIAR';
+    refreshPreview();
+    push();
+  });
+
+  // Modo
+  document.getElementById('mode-btn').addEventListener('click', () => {
+    state.countdown = !state.countdown;
+    const btn = document.getElementById('mode-btn');
+    btn.textContent = state.countdown ? '⇄ CAMBIAR A PROGRESIVO' : '⇄ CAMBIAR A REGRESIVO';
+    document.getElementById('time-preview').classList.remove('warning','danger');
+    refreshPreview();
+    push();
+  });
+
+  // Anterior / Siguiente
+  document.getElementById('prev-btn').addEventListener('click', () => {
+    if (!state.totalSlides) return;
+    state.currentSlide = (state.currentSlide - 1 + state.totalSlides) % state.totalSlides;
+    refreshPreview();
+    push();
+  });
+
+  document.getElementById('next-btn').addEventListener('click', () => {
+    if (!state.totalSlides) return;
+    state.currentSlide = (state.currentSlide + 1) % state.totalSlides;
+    refreshPreview();
+    push();
+  });
+
+  // Subir imágenes
+  document.getElementById('file-input').addEventListener('change', e => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    const tmp = new Array(files.length);
+    let done = 0;
+    files.forEach((f, i) => {
+      const r = new FileReader();
+      r.onload = ev => {
+        tmp[i] = ev.target.result;
+        if (++done === files.length) {
+          state.images = tmp;
+          state.totalSlides = tmp.length;
+          state.currentSlide = 0;
+          refreshPreview();
+          push();
+        }
+      };
+      r.readAsDataURL(f);
+    });
+  });
+
+  // Ajustar tiempo
+  document.getElementById('set-btn').addEventListener('click', () => {
+    document.getElementById('set-panel').classList.add('open');
+  });
+  document.getElementById('cancel-btn').addEventListener('click', () => {
+    document.getElementById('set-panel').classList.remove('open');
+  });
+  document.getElementById('confirm-btn').addEventListener('click', () => {
+    const v = document.getElementById('time-input').value.split(':');
+    if (v.length === 2) {
+      state.totalSeconds = (parseInt(v[0])||0)*60 + (parseInt(v[1])||0);
+      state.elapsed = 0;
+      clearInterval(ticker);
+      state.running = false;
+      document.getElementById('play-btn').textContent = '▶ INICIAR';
+      document.getElementById('time-preview').classList.remove('warning','danger');
+      refreshPreview();
+      push();
+    }
+    document.getElementById('set-panel').classList.remove('open');
+  });
+
+  // Init
+  push();
+  refreshPreview();
+</script>
+</body>
+</html>
