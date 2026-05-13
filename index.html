@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temporizador</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; }
+body { font-family: monospace; color: #fff; position: relative; }
+#slide-bg { position: fixed; inset: 0; background-size: cover; background-position: center; transition: opacity 0.6s; z-index: 0; }
+#overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1; }
+#timer-display { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 10; text-align: center; pointer-events: none; }
+#time-text { font-size: clamp(4rem, 18vw, 11rem); font-weight: 700; letter-spacing: 0.05em; text-shadow: 0 0 60px rgba(0,0,0,0.9); transition: color 0.4s; font-variant-numeric: tabular-nums; }
+#time-text.warning { color: #f97316; }
+#time-text.danger { color: #ef4444; }
+#slide-counter { font-size: 1rem; letter-spacing: 0.2em; opacity: 0.55; margin-top: 0.75rem; }
+#controls { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; padding: 0 1rem; }
+.btn { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25); color: #fff; padding: 0.75rem 1.2rem; border-radius: 8px; cursor: pointer; font-size: 0.8rem; letter-spacing: 0.08em; font-family: monospace; transition: background 0.2s; backdrop-filter: blur(10px); touch-action: manipulation; }
+.btn:hover, .btn:active { background: rgba(255,255,255,0.28); }
+.btn.primary { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.5); }
+#upload-zone { position: fixed; top: 1rem; right: 1rem; z-index: 30; }
+#file-input { display: none; }
+#mode-badge { position: fixed; top: 1rem; left: 1rem; z-index: 30; font-size: 0.7rem; letter-spacing: 0.15em; padding: 0.35rem 0.75rem; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.5); }
+#set-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 50; background: rgba(10,10,10,0.97); border: 1px solid rgba(255,255,255,0.2); border-radius: 14px; padding: 2rem 1.5rem; display: none; width: 300px; text-align: center; }
+#set-panel h3 { font-size: 0.75rem; letter-spacing: 0.2em; opacity: 0.5; margin-bottom: 1.5rem; }
+#time-input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); color: #fff; font-size: 2.5rem; text-align: center; border-radius: 8px; padding: 0.5rem; width: 100%; font-family: monospace; margin-bottom: 1rem; }
+.row { display: flex; gap: 0.5rem; }
+.row .btn { flex: 1; }
+</style>
+</head>
+<body>
+
+<div id="slide-bg"></div>
+<div id="overlay"></div>
+<div id="mode-badge">CUENTA REGRESIVA</div>
+
+<div id="timer-display">
+  <div id="time-text">45:00</div>
+  <div id="slide-counter">SIN IMÁGENES</div>
+</div>
+
+<div id="upload-zone">
+  <button class="btn" onclick="document.getElementById('file-input').click()">+ IMÁGENES</button>
+  <input type="file" id="file-input" multiple accept="image/*">
+</div>
+
+<div id="controls">
+  <button class="btn" id="prev-btn">◀ ANTERIOR</button>
+  <button class="btn primary" id="play-btn">▶ INICIAR</button>
+  <button class="btn" id="stop-btn">■ REINICIAR</button>
+  <button class="btn" id="next-btn">SIGUIENTE ▶</button>
+  <button class="btn" id="mode-btn">⇄ PROGRESIVO</button>
+  <button class="btn" id="set-btn">⏱ AJUSTAR</button>
+</div>
+
+<div id="set-panel">
+  <h3>AJUSTAR TIEMPO (MM:SS)</h3>
+  <input type="text" id="time-input" value="45:00" maxlength="5" placeholder="45:00">
+  <div class="row">
+    <button class="btn" id="cancel-btn">CANCELAR</button>
+    <button class="btn primary" id="confirm-btn">CONFIRMAR</button>
+  </div>
+</div>
+
+<script>
+let images = [], currentSlide = 0;
+let totalSeconds = 2700, elapsed = 0;
+let running = false, countdown = true;
+let ticker = null;
+
+const bg = document.getElementById('slide-bg');
+const timeText = document.getElementById('time-text');
+const slideCounter = document.getElementById('slide-counter');
+const modeBadge = document.getElementById('mode-badge');
+const playBtn = document.getElementById('play-btn');
+
+function pad(n) { return String(n).padStart(2,'0'); }
+function fmt(s) { const a=Math.abs(s); return (s<0?'-':'')+pad(Math.floor(a/60))+':'+pad(a%60); }
+
+function refreshTimer() {
+  const shown = countdown ? totalSeconds - elapsed : elapsed;
+  timeText.textContent = fmt(shown);
+  timeText.classList.remove('warning','danger');
+  if (countdown) {
+    const r = elapsed/totalSeconds;
+    if (r > 0.9) timeText.classList.add('danger');
+    else if (r > 0.75) timeText.classList.add('warning');
+  }
+}
+
+function showSlide(i) {
+  if (!images.length) return;
+  bg.style.backgroundImage = 'url('+images[i]+')';
+  slideCounter.textContent = 'DIAPOSITIVA '+(i+1)+' / '+images.length;
+}
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  const tmp = new Array(files.length);
+  let done = 0;
+  files.forEach((f,i) => {
+    const r = new FileReader();
+    r.onload = ev => { tmp[i]=ev.target.result; if(++done===files.length){ images=tmp; currentSlide=0; showSlide(0); }};
+    r.readAsDataURL(f);
+  });
+});
+
+document.getElementById('prev-btn').addEventListener('click', () => {
+  if (!images.length) return;
+  currentSlide = (currentSlide-1+images.length)%images.length;
+  showSlide(currentSlide);
+});
+
+document.getElementById('next-btn').addEventListener('click', () => {
+  if (!images.length) return;
+  currentSlide = (currentSlide+1)%images.length;
+  showSlide(currentSlide);
+});
+
+playBtn.addEventListener('click', () => {
+  if (running) {
+    clearInterval(ticker); running=false; playBtn.textContent='▶ CONTINUAR';
+  } else {
+    running=true; playBtn.textContent='⏸ PAUSAR';
+    ticker = setInterval(() => {
+      elapsed++;
+      refreshTimer();
+      if (countdown && elapsed>=totalSeconds) {
+        clearInterval(ticker); running=false;
+        playBtn.textContent='▶ INICIAR';
+        timeText.classList.add('danger');
+      }
+    },1000);
+  }
+});
+
+document.getElementById('stop-btn').addEventListener('click', () => {
+  clearInterval(ticker); running=false; elapsed=0;
+  playBtn.textContent='▶ INICIAR';
+  refreshTimer();
+});
+
+document.getElementById('mode-btn').addEventListener('click', () => {
+  countdown=!countdown;
+  document.getElementById('mode-btn').textContent = countdown ? '⇄ PROGRESIVO' : '⇄ REGRESIVO';
+  modeBadge.textContent = countdown ? 'CUENTA REGRESIVA' : 'CUENTA PROGRESIVA';
+  timeText.classList.remove('warning','danger');
+  refreshTimer();
+});
+
+document.getElementById('set-btn').addEventListener('click', () => {
+  document.getElementById('set-panel').style.display='block';
+});
+document.getElementById('cancel-btn').addEventListener('click', () => {
+  document.getElementById('set-panel').style.display='none';
+});
+document.getElementById('confirm-btn').addEventListener('click', () => {
+  const v=document.getElementById('time-input').value.split(':');
+  if (v.length===2) {
+    totalSeconds=(parseInt(v[0])||0)*60+(parseInt(v[1])||0);
+    elapsed=0; clearInterval(ticker); running=false;
+    playBtn.textContent='▶ INICIAR';
+    timeText.classList.remove('warning','danger');
+    refreshTimer();
+  }
+  document.getElementById('set-panel').style.display='none';
+});
+
+refreshTimer();
+</script>
+</body>
+</html>
